@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head><title>CDP Test Page</title></head>
+<body>
+  <h1>Test Page</h1>
+  <button id="btn1" onclick="this.textContent='clicked'">Click Me</button>
+  <input id="input1" type="text" placeholder="Type here">
+  <select id="select1">
+    <option value="a">Option A</option>
+    <option value="b">Option B</option>
+  </select>
+  <a id="link1" href="#about">About</a>
+  <div id="output"></div>
+  <script>
+    console.log("page loaded");
+    document.getElementById('btn1').addEventListener('click', function() {
+      document.getElementById('output').textContent = 'Button was clicked';
+    });
+  </script>
+</body>
+</html>

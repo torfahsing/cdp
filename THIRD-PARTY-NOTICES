@@ -1,0 +1,18 @@
+This project includes third-party software licensed under the Apache License 2.0.
+
+================================================================================
+github.com/spf13/cobra v1.10.2
+Copyright 2013-2023 The Cobra Authors
+Licensed under the Apache License, Version 2.0
+https://github.com/spf13/cobra/blob/main/LICENSE.txt
+================================================================================
+
+================================================================================
+github.com/inconshreveable/mousetrap v1.1.0
+Copyright 2014 Alan Shreve
+Licensed under the Apache License, Version 2.0
+https://github.com/inconshreveable/mousetrap/blob/master/LICENSE
+================================================================================
+
+The full text of the Apache License 2.0 is available at:
+https://www.apache.org/licenses/LICENSE-2.0

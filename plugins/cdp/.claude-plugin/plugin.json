@@ -1,0 +1,17 @@
+{
+  "name": "cdp",
+  "description": "Chrome DevTools Protocol CLI — control Chrome from the terminal with compact commands instead of MCP tool calls",
+  "version": "1.0.0",
+  "author": {
+    "name": "Tor Fahsing"
+  },
+  "keywords": [
+    "chrome",
+    "devtools",
+    "browser",
+    "screenshot",
+    "snapshot",
+    "figma",
+    "cdp"
+  ]
+}

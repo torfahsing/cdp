@@ -1,0 +1,17 @@
+{
+  "name": "cdp",
+  "owner": {
+    "name": "Tor Fahsing"
+  },
+  "metadata": {
+    "description": "Chrome DevTools Protocol CLI for Claude Code — compact browser control via Bash instead of MCP tool calls.",
+    "version": "1.2.0"
+  },
+  "plugins": [
+    {
+      "name": "cdp",
+      "source": "./plugins/cdp",
+      "description": "Control Chrome from the terminal with compact cdp commands instead of MCP tool calls."
+    }
+  ]
+}
