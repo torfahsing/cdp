@@ -5,6 +5,7 @@ package test
 import (
 	"encoding/json"
 	"os/exec"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -27,16 +28,40 @@ func pageIDs(t *testing.T) map[string]bool {
 		t.Fatalf("cdp pages --json failed: %v\n%s", err, out)
 	}
 	var pages []struct {
-		ID string `json:"id"`
+		ID    string `json:"id"`
+		URL   string `json:"url"`
+		Title string `json:"title"`
 	}
 	if err := json.Unmarshal([]byte(out), &pages); err != nil {
 		t.Fatalf("parse pages JSON: %v\n%s", err, out)
 	}
 	ids := make(map[string]bool, len(pages))
 	for _, p := range pages {
+		// Filter the daemon's own scratch about:blank tab, matching
+		// handlePages / ensurePage behaviour.
+		if p.URL == "about:blank" && p.Title == "" {
+			continue
+		}
 		ids[p.ID] = true
 	}
 	return ids
+}
+
+// testURL returns an absolute file:// URL pointing at test/fixtures/test.html.
+// It uses os.Getwd() so it works regardless of the process CWD (the Makefile
+// runs from the repo root; go test ./test/ inherits that CWD).
+func testURL() string {
+	return "file://" + filepath.Join(os.Getwd(), "test", "fixtures", "test.html")
+}
+
+// extractID parses an open-command output line to extract the page ID from its
+// trailing "(<id>)" suffix. Returns empty string on parse failure.
+func extractID(output string) string {
+	parts := strings.Split(output, "(")
+	if len(parts) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimSuffix(parts[1], ")"))
 }
 
 // TestSelectDoesNotCloseTabs verifies that switching between tabs via
@@ -49,7 +74,7 @@ func TestSelectDoesNotCloseTabs(t *testing.T) {
 	}
 
 	// Open two test pages in the background
-	url := "file://" + filepath.Join("fixtures", "test.html")
+	url := testURL()
 	out1, err := runCDP(t, "open", url, "--background")
 	if err != nil {
 		t.Fatalf("cdp open 1 failed: %v\n%s", err, out1)
@@ -66,27 +91,23 @@ func TestSelectDoesNotCloseTabs(t *testing.T) {
 	}
 
 	// Extract page IDs from the open output (format: "Opened <url> (<id>)\n")
-	var idA, idB string
-	for _, out := range []string{out1, out2} {
-		// The id is in parentheses at the end: "Opened ... (abc123)\n"
-		parts := strings.Split(out, "(")
-		if len(parts) < 2 {
-			continue
-		}
-		id := strings.TrimSpace(strings.TrimSuffix(parts[1], ")"))
-		if idA == "" {
-			idA = id
-		} else {
-			idB = id
-		}
-	}
+	idA := extractID(out1)
+	idB := extractID(out2)
 	if idA == "" || idB == "" {
 		t.Fatalf("could not extract page IDs from open output: %q %q", out1, out2)
 	}
 
-	// Switch between tabs multiple times
+	// Switch between tabs multiple times (includes --focus variant)
 	for _, id := range []string{idA, idB, idA, idA} {
-		out, err := runCDP(t, "select", id, "--focus")
+		focus := false
+		if id == idA {
+			focus = true // last select uses --focus
+		}
+		args := []string{"select", id}
+		if focus {
+			args = append(args, "--focus")
+		}
+		out, err := runCDP(t, args...)
 		if err != nil {
 			t.Fatalf("cdp select %s failed: %v\n%s", id, err, out)
 		}
@@ -114,7 +135,7 @@ func TestShutdownDoesNotCloseTabs(t *testing.T) {
 	}
 
 	// Open two test pages in the background
-	url := "file://" + filepath.Join("fixtures", "test.html")
+	url := testURL()
 	out1, err := runCDP(t, "open", url, "--background")
 	if err != nil {
 		t.Fatalf("cdp open 1 failed: %v\n%s", err, out1)
@@ -128,11 +149,7 @@ func TestShutdownDoesNotCloseTabs(t *testing.T) {
 	// will change after daemon restart, so we track only user tabs).
 	userTabIDs := make(map[string]bool)
 	for _, out := range []string{out1, out2} {
-		parts := strings.Split(out, "(")
-		if len(parts) < 2 {
-			continue
-		}
-		id := strings.TrimSpace(strings.TrimSuffix(parts[1], ")"))
+		id := extractID(out)
 		if id != "" {
 			userTabIDs[id] = true
 		}
@@ -141,10 +158,18 @@ func TestShutdownDoesNotCloseTabs(t *testing.T) {
 		t.Fatalf("expected at least 2 user-tab IDs, got %d", len(userTabIDs))
 	}
 
-	// Shutdown the daemon
-	out, err := runCDP(t, "shutdown")
+	// Select one of the user tabs (the other must not be closed).
+	idA := extractID(out1)
+	if _, err := runCDP(t, "select", idA); err != nil {
+		t.Fatalf("cdp select failed: %v", err)
+	}
+
+	// Shut down the daemon (cdp disconnect sends the shutdown command
+	// over the Unix socket; equivalent to the internal cdp shutdown
+	// subcommand).
+	out, err := runCDP(t, "disconnect")
 	if err != nil {
-		t.Fatalf("cdp shutdown failed: %v\n%s", err, out)
+		t.Fatalf("cdp disconnect failed: %v\n%s", err, out)
 	}
 
 	// Wait briefly for the daemon to restart itself (it is re-launched by
@@ -158,13 +183,19 @@ func TestShutdownDoesNotCloseTabs(t *testing.T) {
 
 	// Parse the post-shutdown page list
 	var pages []struct {
-		ID string `json:"id"`
+		ID    string `json:"id"`
+		URL   string `json:"url"`
+		Title string `json:"title"`
 	}
 	if err := json.Unmarshal([]byte(out), &pages); err != nil {
 		t.Fatalf("parse pages JSON after shutdown: %v\n%s", err, out)
 	}
 	after := make(map[string]bool, len(pages))
 	for _, p := range pages {
+		// Filter the daemon's own scratch about:blank tab.
+		if p.URL == "about:blank" && p.Title == "" {
+			continue
+		}
 		after[p.ID] = true
 	}
 
@@ -188,7 +219,7 @@ func TestCloseStillClosesTab(t *testing.T) {
 	}
 
 	// Open two test pages in the background
-	url := "file://" + filepath.Join("fixtures", "test.html")
+	url := testURL()
 	out1, err := runCDP(t, "open", url, "--background")
 	if err != nil {
 		t.Fatalf("cdp open 1 failed: %v\n%s", err, out1)
@@ -199,17 +230,9 @@ func TestCloseStillClosesTab(t *testing.T) {
 	}
 
 	// Extract the first page ID to close
-	var idToClose string
-	for _, out := range []string{out1, out2} {
-		parts := strings.Split(out, "(")
-		if len(parts) < 2 {
-			continue
-		}
-		idToClose = strings.TrimSpace(strings.TrimSuffix(parts[1], ")"))
-		break
-	}
+	idToClose := extractID(out1)
 	if idToClose == "" {
-		t.Fatalf("could not extract page ID from open output")
+		t.Fatalf("could not extract page ID from open output: %q", out1)
 	}
 
 	// Close one tab explicitly
