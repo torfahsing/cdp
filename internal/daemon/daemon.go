@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 
@@ -165,10 +166,7 @@ func (d *Daemon) ensurePage() error {
 		if err := chromedp.Run(d.pageCtx, chromedp.Title(&title)); err == nil {
 			return nil
 		}
-		if d.pageCtx != d.blankCtx {
-			d.pageCancel()
-		}
-		d.pageCtx = nil
+		d.releasePage() // detach only — the tab belongs to the user
 	}
 
 	// Resolve target
@@ -208,7 +206,9 @@ func (d *Daemon) ensurePage() error {
 func (d *Daemon) attachToTarget(targetID target.ID) error {
 	pageCtx, pageCancel := chromedp.NewContext(d.allocCtx, chromedp.WithTargetID(targetID))
 	if err := chromedp.Run(pageCtx); err != nil {
-		pageCancel()
+		// Run can fail after the target was already attached; a bare
+		// pageCancel() would close the user's tab.
+		d.releasePageContext(pageCtx, pageCancel)
 		return fmt.Errorf("attach to target %s: %w", targetID, err)
 	}
 	d.pageCtx = pageCtx
@@ -217,13 +217,53 @@ func (d *Daemon) attachToTarget(targetID target.ID) error {
 	return nil
 }
 
-func (d *Daemon) selectPage(pageID string, focus bool) error {
-	if d.pageCancel != nil {
-		if d.pageCtx != d.blankCtx {
-			d.pageCancel()
-		}
-		d.pageCtx = nil
+// releasePage detaches from the current page without closing the Chrome tab.
+func (d *Daemon) releasePage() {
+	d.releasePageContext(d.pageCtx, d.pageCancel)
+	d.pageCtx = nil
+	d.pageCancel = nil
+}
+
+// releasePageContext tears down a page context created by attachToTarget. It
+// detaches the DevTools session instead of closing the tab: chromedp's cancel
+// goroutine issues Target.detachFromTarget followed by Target.closeTarget for
+// any context created from a RemoteAllocator (chromedp v0.15.1), so we detach
+// ourselves and clear Context.Target, which makes that goroutine take its
+// "never attached" early return. Cancelling a cdp-attached tab is never allowed
+// to close it; only handleClose (Target.closeTarget via `cdp close`) closes tabs.
+func (d *Daemon) releasePageContext(pageCtx context.Context, pageCancel context.CancelFunc) {
+	if pageCancel == nil {
+		return
 	}
+	// The blank scratch tab is created by cdp itself; cancelling it is correct
+	// cleanup and is handled by blankCancel in shutdown/cleanup.
+	if pageCtx == nil || pageCtx == d.blankCtx {
+		return
+	}
+	if c := chromedp.FromContext(pageCtx); c != nil && c.Target != nil {
+		if d.blankCtx != nil {
+			if err := d.detachSession(c.Target.SessionID); err != nil {
+				log.Printf("detach session %s: %v", c.Target.SessionID, err)
+			}
+		}
+		c.Target = nil
+	}
+	pageCancel()
+}
+
+// detachSession ends a flattened DevTools session at the browser level.
+func (d *Daemon) detachSession(sessionID target.SessionID) error {
+	if sessionID == "" {
+		return nil
+	}
+	return chromedp.Run(d.blankCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+		browser := chromedp.FromContext(ctx).Browser
+		return target.DetachFromTarget().WithSessionID(sessionID).Do(cdp.WithExecutor(ctx, browser))
+	}))
+}
+
+func (d *Daemon) selectPage(pageID string, focus bool) error {
+	d.releasePage()
 
 	d.selectedPage = pageID
 
@@ -267,9 +307,7 @@ func (d *Daemon) handleConn(conn net.Conn) {
 
 func (d *Daemon) shutdown() {
 	log.Printf("shutting down")
-	if d.pageCancel != nil {
-		d.pageCancel()
-	}
+	d.releasePage()
 	if d.blankCancel != nil {
 		d.blankCancel()
 	}

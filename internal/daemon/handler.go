@@ -218,7 +218,8 @@ func (d *Daemon) handleSelect(args SelectArgs) *Response {
 
 func (d *Daemon) handleClose(args ClosePageArgs) *Response {
 	if err := chromedp.Run(d.blankCtx, chromedp.ActionFunc(func(ctx context.Context) error {
-		return target.CloseTarget(target.ID(args.PageID)).Do(ctx)
+		browser := chromedp.FromContext(ctx).Browser
+		return target.CloseTarget(target.ID(args.PageID)).Do(cdp.WithExecutor(ctx, browser))
 	})); err != nil {
 		return &Response{Error: err.Error()}
 	}
