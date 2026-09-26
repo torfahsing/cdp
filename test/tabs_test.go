@@ -135,32 +135,40 @@ func TestShutdownDoesNotCloseTabs(t *testing.T) {
 		t.Fatalf("cdp disconnect failed: %v", err)
 	}
 
+	// Capture baseline pages (daemon's own scratch tab only, filtered out).
+	before := pageIDs(t)
+
 	// Open two test pages in the background
 	url := testURL()
-	out1, err := runCDP(t, "open", url, "--background")
+	_, err = runCDP(t, "open", url, "--background")
 	if err != nil {
-		t.Fatalf("cdp open 1 failed: %v\n%s", err, out1)
+		t.Fatalf("cdp open 1 failed: %v", err)
 	}
-	out2, err := runCDP(t, "open", url, "--background")
+	_, err = runCDP(t, "open", url, "--background")
 	if err != nil {
-		t.Fatalf("cdp open 2 failed: %v\n%s", err, out2)
+		t.Fatalf("cdp open 2 failed: %v", err)
 	}
 
-	// Extract user-tab IDs from open output (the scratch tab's ID
-	// will change after daemon restart, so we track only user tabs).
-	userTabIDs := make(map[string]bool)
-	for _, out := range []string{out1, out2} {
-		id := extractID(out)
-		if id != "" {
-			userTabIDs[id] = true
+	// Identify user-tab IDs by comparing against the baseline; this gives us
+	// the full 32-char target IDs returned by cdp pages --json, so they can
+	// be compared correctly after daemon restart (no 8-char truncation mismatch).
+	afterOpen := pageIDs(t)
+	var newlyOpened []string
+	for id := range afterOpen {
+		if !before[id] {
+			newlyOpened = append(newlyOpened, id)
 		}
 	}
-	if len(userTabIDs) < 2 {
-		t.Fatalf("expected at least 2 user-tab IDs, got %d", len(userTabIDs))
+	if len(newlyOpened) < 2 {
+		t.Fatalf("expected 2 user tabs after opening, got %d (before=%d after=%d)", len(newlyOpened), len(before), len(afterOpen))
+	}
+	idA := newlyOpened[0] // full ID for select
+	userTabIDs := make(map[string]bool)
+	for _, id := range newlyOpened {
+		userTabIDs[id] = true
 	}
 
 	// Select one of the user tabs (the other must not be closed).
-	idA := extractID(out1)
 	if _, err := runCDP(t, "select", idA); err != nil {
 		t.Fatalf("cdp select failed: %v", err)
 	}
