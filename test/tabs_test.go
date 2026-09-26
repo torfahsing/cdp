@@ -48,10 +48,10 @@ func pageIDs(t *testing.T) map[string]bool {
 }
 
 // testURL returns an absolute file:// URL pointing at test/fixtures/test.html.
-// It uses os.Getwd() so it works regardless of the process CWD (the Makefile
-// runs from the repo root; go test ./test/ inherits that CWD).
+// go test ./test/ runs with its working directory set to the test package dir,
+// so we join fixtures relative to os.Getwd() (no extra "test" segment).
 func testURL() string {
-	return "file://" + filepath.Join(os.Getwd(), "test", "fixtures", "test.html")
+	return "file://" + filepath.Join(os.Getwd(), "fixtures", "test.html")
 }
 
 // extractID parses an open-command output line to extract the page ID from its
