@@ -218,39 +218,52 @@ func TestCloseStillClosesTab(t *testing.T) {
 		t.Fatalf("cdp disconnect failed: %v", err)
 	}
 
+	// Capture baseline pages (daemon's own scratch tab only, filtered out later).
+	before := pageIDs(t)
+
 	// Open two test pages in the background
 	url := testURL()
-	out1, err := runCDP(t, "open", url, "--background")
+	_, err = runCDP(t, "open", url, "--background")
 	if err != nil {
-		t.Fatalf("cdp open 1 failed: %v\n%s", err, out1)
+		t.Fatalf("cdp open 1 failed: %v", err)
 	}
-	out2, err := runCDP(t, "open", url, "--background")
+	_, err = runCDP(t, "open", url, "--background")
 	if err != nil {
-		t.Fatalf("cdp open 2 failed: %v\n%s", err, out2)
+		t.Fatalf("cdp open 2 failed: %v", err)
 	}
 
-	// Extract the first page ID to close
-	idToClose := extractID(out1)
-	if idToClose == "" {
-		t.Fatalf("could not extract page ID from open output: %q", out1)
+	// Identify the two newly opened pages by comparing against the baseline.
+	// cdp pages --json returns full 32-char target IDs which cdp close requires.
+	afterOpen := pageIDs(t)
+	var newlyOpened []string
+	for id := range afterOpen {
+		if !before[id] {
+			newlyOpened = append(newlyOpened, id)
+		}
 	}
+	if len(newlyOpened) < 2 {
+		t.Fatalf("expected 2 newly opened pages, got %d (before=%d after=%d)", len(newlyOpened), len(before), len(afterOpen))
+	}
+	idToClose := newlyOpened[0] // full 32-char target ID from cdp pages --json
 
 	// Close one tab explicitly
 	out, err := runCDP(t, "close", idToClose)
 	if err != nil {
 		t.Fatalf("cdp close %s failed: %v\n%s", idToClose, err, out)
 	}
-	if !strings.Contains(out, "Closed page "+idToClose) {
-		t.Errorf("expected 'Closed page %s' output, got: %s", idToClose, out)
+	// Output contains the short 8-char prefix, not the full ID.
+	shortPrefix := idToClose[:8]
+	if !strings.Contains(out, "Closed page "+shortPrefix) {
+		t.Errorf("expected 'Closed page %s' output, got: %s", shortPrefix, out)
 	}
 
-	// The closed ID must be gone, but the other must survive
+	// The closed full ID must be gone, but the other newly-opened tab must survive.
 	after := pageIDs(t)
 	if after[idToClose] {
 		t.Errorf("page %s was not closed by cdp close", idToClose)
 	}
-	// At least one page should remain (the other test tab)
-	if len(after) == 0 {
-		t.Error("all pages were closed; expected at least one survivor")
+	idSurvivor := newlyOpened[1]
+	if !after[idSurvivor] {
+		t.Errorf("page %s should have survived cdp close", idSurvivor)
 	}
 }
