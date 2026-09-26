@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func runCDP(t *testing.T, args ...string) (string, error) {
@@ -172,13 +173,25 @@ func TestShutdownDoesNotCloseTabs(t *testing.T) {
 		t.Fatalf("cdp disconnect failed: %v\n%s", err, out)
 	}
 
-	// Wait briefly for the daemon to restart itself (it is re-launched by
-	// the test runner's process model; if the daemon is already dead,
-	// subsequent commands will fail with a clear error).
-	// Reconnect by running a simple command.
-	out, err = runCDP(t, "pages", "--json")
+	// Wait for the daemon to come back up after disconnect/shutdown. The
+	// daemon sleeps ~100 ms during shutdown and then exits; on the next
+	// cdp invocation a fresh daemon is spawned. Attempting to connect while
+	// the old socket is still present (but the dispatch goroutine is gone)
+	// yields a connection reset / EOF, so we poll until success.
+	var pagesOut string
+	for retries := 0; retries < 10; retries++ {
+		if retries > 0 {
+			time.Sleep(200 * time.Millisecond)
+		}
+		pagesOut, err = runCDP(t, "pages", "--json")
+		if err == nil {
+			break
+		}
+		// Log the transient failure but keep trying.
+		t.Logf("daemon not yet ready (attempt %d): %v", retries+1, err)
+	}
 	if err != nil {
-		t.Fatalf("cdp pages after shutdown failed: %v\n%s", err, out)
+		t.Fatalf("cdp pages after shutdown failed after retries: %v\n%s", err, pagesOut)
 	}
 
 	// Parse the post-shutdown page list
@@ -187,8 +200,8 @@ func TestShutdownDoesNotCloseTabs(t *testing.T) {
 		URL   string `json:"url"`
 		Title string `json:"title"`
 	}
-	if err := json.Unmarshal([]byte(out), &pages); err != nil {
-		t.Fatalf("parse pages JSON after shutdown: %v\n%s", err, out)
+	if err := json.Unmarshal([]byte(pagesOut), &pages); err != nil {
+		t.Fatalf("parse pages JSON after shutdown: %v\n%s", err, pagesOut)
 	}
 	after := make(map[string]bool, len(pages))
 	for _, p := range pages {
