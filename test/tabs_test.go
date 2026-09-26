@@ -98,15 +98,12 @@ func TestSelectDoesNotCloseTabs(t *testing.T) {
 		t.Fatalf("could not extract page IDs from open output: %q %q", out1, out2)
 	}
 
-	// Switch between tabs multiple times (includes --focus variant)
-	for _, id := range []string{idA, idB, idA, idA} {
-		focus := false
-		if id == idA {
-			focus = true // last select uses --focus
-		}
+	// Switch between tabs multiple times; the last select uses --focus.
+	selections := []string{idA, idB, idA, idA}
+	for i, id := range selections {
 		args := []string{"select", id}
-		if focus {
-			args = append(args, "--focus")
+		if i == len(selections)-1 {
+			args = append(args, "--focus") // last select only
 		}
 		out, err := runCDP(t, args...)
 		if err != nil {
